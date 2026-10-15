@@ -1,0 +1,53 @@
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="16dp"
+    android:background="@drawable/widget_background">
+
+    <TextView
+        android:id="@+id/widget_date"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="教师课表"
+        android:textColor="#B8C5DB"
+        android:textSize="11sp"
+        android:fontFamily="sans" />
+
+    <TextView
+        android:id="@+id/widget_state"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="9dp"
+        android:text="下一节课程"
+        android:textColor="#91DDB4"
+        android:textSize="11sp"
+        android:textStyle="bold"
+        android:fontFamily="sans" />
+
+    <TextView
+        android:id="@+id/widget_course"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="3dp"
+        android:ellipsize="end"
+        android:maxLines="1"
+        android:text="语文 · 2班"
+        android:textColor="#F6F7FC"
+        android:textSize="20sp"
+        android:textStyle="bold"
+        android:fontFamily="sans" />
+
+    <TextView
+        android:id="@+id/widget_time"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="6dp"
+        android:ellipsize="end"
+        android:maxLines="1"
+        android:text="09:15 — 09:55  ·  第 2 节"
+        android:textColor="#B8C5DB"
+        android:textSize="11sp"
+        android:fontFamily="sans" />
+</LinearLayout>

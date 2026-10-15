@@ -1,0 +1,207 @@
+import SwiftUI
+import WidgetKit
+
+struct ScheduleEntry: TimelineEntry {
+    let date: Date
+    let data: ScheduleData
+}
+
+struct ScheduleProvider: TimelineProvider {
+    func placeholder(in context: Context) -> ScheduleEntry { ScheduleEntry(date: .now, data: .sample) }
+    func getSnapshot(in context: Context, completion: @escaping (ScheduleEntry) -> Void) { completion(ScheduleEntry(date: .now, data: load())) }
+    func getTimeline(in context: Context, completion: @escaping (Timeline<ScheduleEntry>) -> Void) {
+        let now = Date.now
+        let data = load()
+        var dates = [now]
+        let calendar = Calendar.current
+        // Avoid a dynamic Text(timer:) inside the widget archive. On both
+        // iOS 26.5 and 27.0 it crashes while WidgetKit serializes the
+        // accessibility text, leaving the home-screen widget as a skeleton.
+        // Pre-render minute snapshots instead; WidgetKit can advance through
+        // these entries without starting the extension again every minute.
+        let firstMinute = floor(now.timeIntervalSince1970 / 60) * 60 + 60
+        for minuteOffset in 0..<60 {
+            dates.append(Date(timeIntervalSince1970: firstMinute + Double(minuteOffset * 60)))
+        }
+        for offset in 0...7 {
+            guard let day = calendar.date(byAdding: .day, value: offset, to: calendar.startOfDay(for: now)) else { continue }
+            for course in ScheduleEngine.coursesForToday(in: data, at: day) {
+                for minute in [course.startMinute, course.endMinute] {
+                    if let edge = ScheduleEngine.dateAtMinute(minute, on: day), edge > now { dates.append(edge) }
+                }
+            }
+            // Refresh at midnight so the weekday rolls over even on days without classes.
+            if let midnight = calendar.date(byAdding: .day, value: offset + 1, to: calendar.startOfDay(for: now)), midnight > now { dates.append(midnight) }
+        }
+        let entries = Array(Set(dates)).sorted().map { ScheduleEntry(date: $0, data: data) }
+        completion(Timeline(entries: entries, policy: .after(now.addingTimeInterval(3600))))
+    }
+    private func load() -> ScheduleData {
+        guard let defaults = UserDefaults(suiteName: AppConfig.groupID) else { return ScheduleData() }
+        defaults.synchronize()
+        guard let raw = defaults.data(forKey: AppConfig.dataKey), let data = try? JSONDecoder().decode(ScheduleData.self, from: raw) else { return ScheduleData() }
+        return data
+    }
+}
+
+struct TeacherScheduleWidget: Widget {
+    let kind = "TeacherScheduleWidget"
+    var body: some WidgetConfiguration {
+        StaticConfiguration(kind: kind, provider: ScheduleProvider()) { entry in
+            WidgetContent(entry: entry)
+        }
+        .configurationDisplayName("教师课表")
+        .description("快速查看当前课程和下一节课")
+        .supportedFamilies([.systemSmall, .systemMedium, .accessoryRectangular])
+    }
+}
+
+struct WidgetContent: View {
+    @Environment(\.widgetFamily) private var family
+    let entry: ScheduleEntry
+    private var backgroundColor: Color {
+        let value = entry.data.settings.widgetBackground
+        return Color(.sRGB, red: value.red, green: value.green, blue: value.blue, opacity: value.opacity)
+    }
+    private var textColor: Color {
+        let value = entry.data.settings.widgetTextColor
+        return Color(.sRGB, red: value.red, green: value.green, blue: value.blue, opacity: value.opacity)
+    }
+    private var clock: some View {
+        Text(entry.date.formatted(.dateTime.hour().minute()))
+            .monospacedDigit()
+    }
+
+    var body: some View {
+        if family == .accessoryRectangular { lockScreen }
+        else if family == .systemMedium { medium }
+        else { small }
+    }
+    private var small: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            clock.font(.title2.bold())
+            switch ScheduleEngine.state(in: entry.data, at: entry.date) {
+            case .inClass(let c):
+                Text("第\(c.period)节").font(.caption).foregroundStyle(textColor.opacity(0.75))
+                Text(c.classroom).font(.headline).lineLimit(1)
+                Text(c.subject).font(.title3.bold()).lineLimit(1)
+                Text("下课 \(TimeText.string(c.endMinute))").font(.caption).foregroundStyle(textColor.opacity(0.7))
+            case .breakTime(let c):
+                let beforeFirst = ScheduleEngine.coursesForToday(in: entry.data, at: entry.date).first.map { ScheduleEngine.minuteOfDay(entry.date) < $0.startMinute } ?? false
+                Text(beforeFirst ? "课前" : "课间").font(.caption).foregroundStyle(textColor.opacity(0.75))
+                if let c {
+                    Text("下一节 · 第\(c.period)节").font(.headline).lineLimit(1)
+                    Text("\(c.classroom) · \(c.subject)").font(.caption).lineLimit(1)
+                    Text("\(TimeText.string(c.startMinute)) 开始").font(.caption).foregroundStyle(textColor.opacity(0.7))
+                }
+            case .finished(let last, let next):
+                Text("今日课程已结束").font(.subheadline)
+                if let last {
+                    Text("最后一节 · 第\(last.period)节").font(.caption).foregroundStyle(textColor.opacity(0.7))
+                    Text("\(last.classroom) · \(last.subject)").font(.headline).lineLimit(1)
+                }
+                if let next { nextCourseSummary(next) }
+            case .noClasses(let next):
+                Text("今日无课").font(.subheadline)
+                if let next { nextCourseSummary(next) }
+            }
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .foregroundColor(textColor)
+        .containerBackground(backgroundColor, for: .widget)
+        // WidgetKit archives the rendered view (including accessibility data).
+        // Flattening the styled Text descendants avoids a SwiftUI 26.5/27
+        // CodableAttributedString crash while keeping one useful VoiceOver item.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accessibilitySummary)
+    }
+    private var medium: some View {
+        HStack(alignment: .top, spacing: 18) {
+            VStack(alignment: .leading, spacing: 5) {
+                Text(entry.date.formatted(.dateTime.weekday(.wide).month(.abbreviated).day())).font(.caption).foregroundStyle(textColor.opacity(0.7))
+                clock.font(.largeTitle.bold())
+                switch ScheduleEngine.state(in: entry.data, at: entry.date) {
+                case .inClass(let c):
+                    Text("第\(c.period)节 · \(c.classroom) · \(c.subject)").font(.headline).lineLimit(2)
+                    Text("下课 \(TimeText.string(c.endMinute))").font(.caption).foregroundStyle(textColor.opacity(0.7))
+                case .breakTime(let c):
+                    let beforeFirst = ScheduleEngine.coursesForToday(in: entry.data, at: entry.date).first.map { ScheduleEngine.minuteOfDay(entry.date) < $0.startMinute } ?? false
+                    Text(beforeFirst ? "课前 · 下一节" : "课间 · 下一节").font(.headline)
+                    if let c {
+                        Text("第\(c.period)节 · \(c.classroom) · \(c.subject)").font(.caption).lineLimit(1)
+                        Text("\(TimeText.string(c.startMinute)) 开始").font(.caption).foregroundStyle(textColor.opacity(0.7))
+                    }
+                case .finished(let last, let next):
+                    Text("今日课程已结束").font(.headline)
+                    if let last { Text("最后一节 · 第\(last.period)节").font(.caption); Text("\(last.classroom) · \(last.subject)").font(.subheadline) }
+                    if let next { nextCourseSummary(next) }
+                case .noClasses(let next):
+                    Text("今日无课").font(.headline)
+                    if let next { nextCourseSummary(next) }
+                }
+            }
+            Spacer(minLength: 0)
+            VStack(alignment: .leading, spacing: 7) {
+                Text("下一节").font(.caption).foregroundStyle(textColor.opacity(0.7))
+                if let next = ScheduleEngine.nextCourse(in: entry.data, after: entry.date) {
+                    Text(TimeText.string(next.startMinute)).font(.title2.bold()).monospacedDigit()
+                    Text("\(next.classroom) · \(next.subject)").font(.subheadline).lineLimit(2)
+                } else { Text("无").font(.headline) }
+                Spacer(minLength: 0)
+                Text("今日还有 \(remainingCount) 节").font(.caption).foregroundStyle(textColor.opacity(0.7))
+            }.frame(maxWidth: 135, alignment: .leading)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        .foregroundColor(textColor)
+        .containerBackground(backgroundColor, for: .widget)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accessibilitySummary)
+    }
+    private var lockScreen: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            if let c = ScheduleEngine.currentCourse(in: entry.data, at: entry.date) {
+                Text("第\(c.period)节 · \(c.classroom) · \(c.subject)").font(.headline).lineLimit(1)
+                Text("下课 \(TimeText.string(c.endMinute))").font(.caption)
+            } else if let c = ScheduleEngine.nextCourse(in: entry.data, after: entry.date) {
+                Text("下一节 · \(c.classroom) · \(c.subject)").font(.headline).lineLimit(1)
+                Text("\(TimeText.string(c.startMinute)) 开始").font(.caption)
+            } else { Text("今日课程已结束") }
+        }.foregroundColor(textColor).widgetURL(URL(string: "teacherschedule://today"))
+    }
+
+    @ViewBuilder private func nextCourseSummary(_ course: Course) -> some View {
+        Text("下一节 · 第\(course.period)节").font(.caption).foregroundStyle(textColor.opacity(0.7))
+        Text("\(course.classroom) · \(course.subject)").font(.subheadline).lineLimit(1)
+        Text("\(TimeText.string(course.startMinute)) 开始").font(.caption).foregroundStyle(textColor.opacity(0.7))
+    }
+    private var remainingCount: Int {
+        ScheduleEngine.coursesForToday(in: entry.data, at: entry.date).filter { $0.startMinute > ScheduleEngine.minuteOfDay(entry.date) }.count + (ScheduleEngine.currentCourse(in: entry.data, at: entry.date) == nil ? 0 : 1)
+    }
+
+    private var accessibilitySummary: String {
+        let time = entry.date.formatted(.dateTime.hour().minute())
+        switch ScheduleEngine.state(in: entry.data, at: entry.date) {
+        case .inClass(let course):
+            return "现在时间 \(time)，第 \(course.period) 节，\(course.classroom)，\(course.subject)，下课时间 \(TimeText.string(course.endMinute))"
+        case .breakTime(let course):
+            if let course {
+                return "现在时间 \(time)，课间休息，下一节第 \(course.period) 节，\(course.classroom)，\(course.subject)，\(TimeText.string(course.startMinute)) 开始"
+            }
+            return "现在时间 \(time)，课间休息"
+        case .finished(let last, let next):
+            var summary = "现在时间 \(time)，今日课程已结束"
+            if let last { summary += "，最后一节第 \(last.period) 节，\(last.classroom)，\(last.subject)" }
+            if let next { summary += "，下一节 \(next.classroom)，\(next.subject)，\(TimeText.string(next.startMinute)) 开始" }
+            return summary
+        case .noClasses(let next):
+            if let next { return "现在时间 \(time)，今日无课，下一节 \(next.classroom)，\(next.subject)，\(TimeText.string(next.startMinute)) 开始" }
+            return "现在时间 \(time)，今日无课"
+        }
+    }
+}
+
+@main
+struct TeacherScheduleWidgetBundle: WidgetBundle {
+    var body: some Widget { TeacherScheduleWidget() }
+}

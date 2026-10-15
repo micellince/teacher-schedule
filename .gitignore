@@ -1,0 +1,17 @@
+.DS_Store
+**/.DS_Store
+
+# Xcode
+**/xcuserdata/
+**/DerivedData/
+*.xcuserstate
+*.moved-aside
+build/
+
+# Gradle / Android
+.gradle/
+**/build/
+local.properties
+*.iml
+.idea/
+captures/

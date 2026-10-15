@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#10151d">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="教师课表">
+  <meta name="description" content="一眼查看现在、下一节和今天的课程。">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="icons/app-icon-180.png">
+  <link rel="stylesheet" href="styles.css">
+  <title>教师课表</title>
+</head>
+<body>
+  <main id="app" class="app-shell">
+    <header class="topbar">
+      <div class="brand"><span class="brand-mark">课</span><span>教师课表</span></div>
+      <button class="icon-button" type="button" data-action="add-course" aria-label="添加课程">＋</button>
+    </header>
+    <section id="view" class="view" aria-live="polite"></section>
+    <nav class="tabbar" aria-label="主导航">
+      <button class="tab active" data-tab="today"><span>◷</span><small>桌面</small></button>
+      <button class="tab" data-tab="schedule"><span>▦</span><small>课表</small></button>
+      <button class="tab" data-tab="settings"><span>⚙</span><small>设置</small></button>
+    </nav>
+  </main>
+  <dialog id="course-dialog" class="sheet-dialog">
+    <form id="course-form" class="course-form" method="dialog">
+      <div class="sheet-handle"></div>
+      <div class="sheet-heading"><div><p class="eyebrow">课程安排</p><h2 id="course-dialog-title">添加课程</h2></div><button class="icon-button quiet" value="cancel" aria-label="关闭">×</button></div>
+      <input type="hidden" name="id">
+      <input type="hidden" name="label">
+      <label>星期<select name="weekday" required></select></label>
+      <div class="form-grid"><label>第几节<input name="period" type="number" min="1" max="20" value="1" required></label><label>班级<input name="classroom" list="class-options" placeholder="填写班级" required></label></div>
+      <datalist id="class-options"></datalist>
+      <label>学科<input name="subject" list="subject-options" placeholder="填写学科" required></label>
+      <datalist id="subject-options"></datalist>
+      <div class="form-grid"><label>开始<input name="start" type="time" required></label><label>结束<input name="end" type="time" required></label></div>
+      <label>备注 <span class="muted">（可选）</span><textarea name="note" rows="2" placeholder="上课提醒、教室等"></textarea></label>
+      <div class="form-actions"><button id="delete-course" class="button danger hidden" type="button">删除</button><span class="spacer"></span><button class="button secondary" value="cancel">取消</button><button class="button primary" id="save-course" value="save">保存课程</button></div>
+    </form>
+  </dialog>
+  <input id="import-file" type="file" accept="application/json,.json" hidden>
+  <div id="toast" class="toast" role="status"></div>
+  <script src="app.js" defer></script>
+</body>
+</html>
